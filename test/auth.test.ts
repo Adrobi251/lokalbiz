@@ -389,6 +389,28 @@ test('bearer JWT tanpa jti ditolak, sementara bearer dengan sesi aktif tetap dit
   }
 });
 
+test('bearer JWT dengan jti yang tidak terdaftar ditolak', async () => {
+  const context = await createContext();
+  try {
+    const registered = await register(context, 'unknown-jti@example.com');
+    const tokenWithUnknownJti = await new SignJWT({})
+      .setProtectedHeader({ alg: 'HS256', typ: 'JWT' })
+      .setSubject(registered.user.id)
+      .setJti(randomUUID())
+      .setIssuedAt()
+      .setExpirationTime('2h')
+      .sign(secretKey);
+
+    const response = await request(context, '/api/businesses/current', {
+      authorization: `Bearer ${tokenWithUnknownJti}`,
+    });
+
+    assertError(response, 401, 'INVALID_TOKEN');
+  } finally {
+    await context.close();
+  }
+});
+
 test('cookie auth mengisolasi usaha antar user', async () => {
   const context = await createContext();
   try {
