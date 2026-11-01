@@ -62,10 +62,12 @@ async function request(
     body?: unknown;
     cookie?: string;
     origin?: string | null;
+    authorization?: string;
     csrfToken?: string;
   } = {},
 ): Promise<{ response: Response; body: Json }> {
   const headers: Record<string, string> = {};
+  if (options.authorization) headers.Authorization = options.authorization;
   if (options.cookie) headers.Cookie = options.cookie;
   if (options.origin) headers.Origin = options.origin;
   if (options.csrfToken !== undefined) headers['X-CSRF-Token'] = options.csrfToken;
@@ -358,6 +360,30 @@ test('cookie berisi JWT yang kedaluwarsa ditolak oleh route terlindungi', async 
       cookie: `lokalbiz_session=${expiredToken}`,
     });
     assertError(current, 401, 'INVALID_TOKEN');
+  } finally {
+    await context.close();
+  }
+});
+
+test('bearer JWT tanpa jti ditolak, sementara bearer dengan sesi aktif tetap diterima', async () => {
+  const context = await createContext();
+  try {
+    const registered = await register(context, 'bearer-jti@example.com');
+    const activeSession = await request(context, '/api/businesses/current', {
+      authorization: `Bearer ${registered.cookie.value}`,
+    });
+    assertError(activeSession, 404, 'BUSINESS_NOT_FOUND');
+
+    const tokenWithoutJti = await new SignJWT({})
+      .setProtectedHeader({ alg: 'HS256', typ: 'JWT' })
+      .setSubject(registered.user.id)
+      .setIssuedAt()
+      .setExpirationTime('2h')
+      .sign(secretKey);
+    const missingSession = await request(context, '/api/businesses/current', {
+      authorization: `Bearer ${tokenWithoutJti}`,
+    });
+    assertError(missingSession, 401, 'INVALID_TOKEN');
   } finally {
     await context.close();
   }

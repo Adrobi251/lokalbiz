@@ -2,11 +2,11 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { SignJWT } from 'jose';
 import { test } from 'node:test';
 import { createApp, type AiSummaryProvider } from '../src/app.js';
 import { createDatabase, type SqliteDatabase, nowIso } from '../src/db.js';
 import { periodBounds } from '../src/period.js';
+import { createTestBearerToken } from './auth-fixtures.js';
 
 const authSecret = 'test-secret-with-at-least-thirty-two-bytes';
 process.env.AUTH_JWT_SECRET = authSecret;
@@ -29,12 +29,7 @@ async function createContext(options: { timeZone?: string; aiSummaryProvider?: A
   const tokenFor = (userId = 'owner-1'): Promise<string> => {
     const cached = tokenCache.get(userId);
     if (cached) return cached;
-    const token = new SignJWT({})
-      .setProtectedHeader({ alg: 'HS256' })
-      .setSubject(userId)
-      .setIssuedAt()
-      .setExpirationTime('2h')
-      .sign(new TextEncoder().encode(authSecret));
+    const token = createTestBearerToken(database, userId);
     tokenCache.set(userId, token);
     return token;
   };

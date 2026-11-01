@@ -2,11 +2,11 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { SignJWT } from 'jose';
 import { test } from 'node:test';
 import { createApp, type AiSummaryProvider } from '../src/app.js';
 import { createDatabase, type SqliteDatabase, nowIso } from '../src/db.js';
 import { createGeminiFreeSummaryProviderFromEnvironment } from '../src/gemini-summary.js';
+import { createTestBearerToken } from './auth-fixtures.js';
 import { addDays, formatDate } from '../web/src/lib/format.ts';
 
 const authSecret = 'test-secret-with-at-least-thirty-two-bytes';
@@ -36,12 +36,7 @@ async function createContext(aiSummaryProvider: AiSummaryProvider, timeZone = 'U
     VALUES (?, ?, 'owner-1', 'OWNER', 1, ?)
   `).run(randomUUID(), businessId, createdAt);
 
-  const token = await new SignJWT({})
-    .setProtectedHeader({ alg: 'HS256' })
-    .setSubject('owner-1')
-    .setIssuedAt()
-    .setExpirationTime('2h')
-    .sign(new TextEncoder().encode(authSecret));
+  const token = await createTestBearerToken(database, 'owner-1');
   const server = createServer(createApp(database, { aiSummaryProvider }));
   await new Promise<void>((resolve, reject) => {
     server.once('error', reject);

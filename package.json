@@ -8,10 +8,11 @@
   },
   "scripts": {
     "dev": "node --env-file-if-exists=.env --import tsx --watch src/server.ts",
-    "build": "tsc -p tsconfig.json",
-    "start": "node --env-file-if-exists=.env dist/server.js",
+    "build": "tsc -p tsconfig.json && mkdir -p dist/migrations && cp migrations/*.sql dist/migrations/",
+    "start": "node --env-file-if-exists=.env dist/src/server.js",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "node --import tsx --test test/*.test.ts"
+    "test": "node --import tsx --test test/*.test.ts",
+    "test:production": "node --import tsx --test test/production/production-start.test.ts"
   },
   "dependencies": {
     "@js-temporal/polyfill": "^0.5.1",

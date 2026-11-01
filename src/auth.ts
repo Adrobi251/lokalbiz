@@ -175,24 +175,25 @@ export function authenticate(database: SqliteDatabase): RequestHandler {
       sendApiError(response, 401, 'INVALID_TOKEN', 'Sesi autentikasi tidak valid.');
       return;
     }
-    if (cookieToken !== undefined && (typeof payload.jti !== 'string'
-      || typeof payload.csrf !== 'string' || !/^[A-Za-z0-9_-]{43}$/.test(payload.csrf))) {
+    if (typeof payload.jti !== 'string') {
+      sendApiError(response, 401, 'INVALID_TOKEN', 'Sesi autentikasi tidak valid.');
+      return;
+    }
+    if (cookieToken !== undefined && (typeof payload.csrf !== 'string' || !/^[A-Za-z0-9_-]{43}$/.test(payload.csrf))) {
       sendApiError(response, 401, 'INVALID_TOKEN', 'Sesi autentikasi tidak valid.');
       return;
     }
 
-    if (typeof payload.jti === 'string') {
-      const activeSession = database.prepare(`
-        SELECT jti FROM auth_session
-        WHERE jti = ? AND user_id = ? AND revoked_at IS NULL AND expires_at > ?
-      `).get(payload.jti, payload.sub, Math.floor(Date.now() / 1_000));
-      if (!activeSession) {
-        sendApiError(response, 401, 'INVALID_TOKEN', 'Sesi autentikasi tidak valid atau telah dicabut.');
-        return;
-      }
-      request.authJti = payload.jti;
+    const activeSession = database.prepare(`
+      SELECT jti FROM auth_session
+      WHERE jti = ? AND user_id = ? AND revoked_at IS NULL AND expires_at > ?
+    `).get(payload.jti, payload.sub, Math.floor(Date.now() / 1_000));
+    if (!activeSession) {
+      sendApiError(response, 401, 'INVALID_TOKEN', 'Sesi autentikasi tidak valid atau telah dicabut.');
+      return;
     }
 
+    request.authJti = payload.jti;
     request.userId = payload.sub;
     request.authMethod = cookieToken !== undefined ? 'cookie' : 'bearer';
     if (typeof payload.csrf === 'string') request.csrfToken = payload.csrf;

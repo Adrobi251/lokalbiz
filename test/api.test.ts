@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { createServer, type Server } from 'node:http';
-import { SignJWT } from 'jose';
 import { test } from 'node:test';
 import type { AddressInfo } from 'node:net';
 import { createApp } from '../src/app.js';
 import { createDatabase, type SqliteDatabase, nowIso } from '../src/db.js';
+import { createTestBearerToken } from './auth-fixtures.js';
 
 const authSecret = 'test-secret-with-at-least-thirty-two-bytes';
 process.env.AUTH_JWT_SECRET = authSecret;
@@ -31,12 +31,7 @@ async function createContext(): Promise<TestContext> {
     VALUES (?, ?, 'owner-1', 'OWNER', 1, ?)
   `).run(randomUUID(), businessId, timestamp);
 
-  const token = await new SignJWT({})
-    .setProtectedHeader({ alg: 'HS256' })
-    .setSubject('owner-1')
-    .setIssuedAt()
-    .setExpirationTime('2h')
-    .sign(new TextEncoder().encode(authSecret));
+  const token = await createTestBearerToken(database, 'owner-1');
   const server = createServer(createApp(database));
   await new Promise<void>((resolve, reject) => {
     server.once('error', reject);
@@ -308,7 +303,7 @@ test('produk dipaginasi dan dicari; prediksi menampilkan status data dan no rece
     assert.ok(forecast.body.data.from);
     assert.ok(forecast.body.data.to);
 
-    const outsiderToken = await new SignJWT({}).setProtectedHeader({ alg: 'HS256' }).setSubject('outsider').setIssuedAt().setExpirationTime('2h').sign(new TextEncoder().encode(authSecret));
+    const outsiderToken = await createTestBearerToken(context.database, 'outsider');
     const forbidden = await call(context, '/api/products', { token: outsiderToken });
     assert.equal(forbidden.response.status, 403);
     assert.equal(forbidden.body.error.code, 'BUSINESS_MEMBERSHIP_REQUIRED');
