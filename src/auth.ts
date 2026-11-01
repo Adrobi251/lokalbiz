@@ -1,7 +1,7 @@
 import { randomBytes, randomUUID, scrypt as scryptCallback, timingSafeEqual, type ScryptOptions } from 'node:crypto';
 import type { NextFunction, Request, RequestHandler, Response } from 'express';
 import { SignJWT, jwtVerify } from 'jose';
-import type { SqliteDatabase } from './db.js';
+import type { DatabaseClient } from './db-client.js';
 import { ApiError, sendApiError } from './errors.js';
 
 export const AUTH_SESSION_COOKIE_NAME = 'lokalbiz_session';
@@ -142,7 +142,7 @@ declare global {
   }
 }
 
-export function authenticate(database: SqliteDatabase): RequestHandler {
+export function authenticate(database: DatabaseClient): RequestHandler {
   return async (request, response, next) => {
     const cookieToken = getSessionCookie(request);
     const authorization = request.get('authorization');
@@ -184,7 +184,7 @@ export function authenticate(database: SqliteDatabase): RequestHandler {
       return;
     }
 
-    const activeSession = database.prepare(`
+    const activeSession = await database.prepare(`
       SELECT jti FROM auth_session
       WHERE jti = ? AND user_id = ? AND revoked_at IS NULL AND expires_at > ?
     `).get(payload.jti, payload.sub, Math.floor(Date.now() / 1_000));

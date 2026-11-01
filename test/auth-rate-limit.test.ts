@@ -9,6 +9,7 @@ import { test } from 'node:test';
 import { createApp } from '../src/app.js';
 import { AUTH_RATE_LIMITS, consumeAuthRateLimit } from '../src/auth-rate-limit.js';
 import { createDatabase, type SqliteDatabase, nowIso } from '../src/db.js';
+import { createSqliteDatabaseClient } from '../src/db-client.js';
 
 const authSecret = 'test-secret-with-at-least-thirty-two-bytes';
 const appOrigin = 'http://localhost:5173';
@@ -120,13 +121,13 @@ test('login membatasi percobaan berulang untuk email dan IP yang sama dengan 429
   }
 });
 
-test('batas IP login bekerja lintas identitas dan fixed window ter-reset saat kedaluwarsa', () => {
-  const database = createDatabase(':memory:');
+test('batas IP login bekerja lintas identitas dan fixed window ter-reset saat kedaluwarsa', async () => {
+  const database = createSqliteDatabaseClient(createDatabase(':memory:'));
   const nowMs = 1_800_000_000_000;
   const clientIp = '198.51.100.25';
   try {
     for (let attempt = 0; attempt < AUTH_RATE_LIMITS.loginPerIp.limit; attempt += 1) {
-      const retryAfter = consumeAuthRateLimit(database, {
+      const retryAfter = await consumeAuthRateLimit(database, {
         action: 'login',
         clientIp,
         email: `user-${attempt}@example.com`,
@@ -136,7 +137,7 @@ test('batas IP login bekerja lintas identitas dan fixed window ter-reset saat ke
       assert.equal(retryAfter, undefined);
     }
 
-    const limited = consumeAuthRateLimit(database, {
+    const limited = await consumeAuthRateLimit(database, {
       action: 'login',
       clientIp,
       email: 'new-identity@example.com',
@@ -145,7 +146,7 @@ test('batas IP login bekerja lintas identitas dan fixed window ter-reset saat ke
     });
     assert.ok(limited && limited > 0 && limited <= AUTH_RATE_LIMITS.loginPerIp.windowSeconds);
 
-    const afterWindow = consumeAuthRateLimit(database, {
+    const afterWindow = await consumeAuthRateLimit(database, {
       action: 'login',
       clientIp,
       email: 'new-identity@example.com',
@@ -154,7 +155,7 @@ test('batas IP login bekerja lintas identitas dan fixed window ter-reset saat ke
     });
     assert.equal(afterWindow, undefined);
   } finally {
-    database.close();
+    await database.close();
   }
 });
 

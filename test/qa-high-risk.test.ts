@@ -4,6 +4,7 @@ import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { test } from 'node:test';
 import { createApp, type AiSummaryProvider } from '../src/app.js';
+import { createSqliteDatabaseClient, type DatabaseClient } from '../src/db-client.js';
 import { createDatabase, type SqliteDatabase, nowIso } from '../src/db.js';
 import { periodBounds } from '../src/period.js';
 import { createTestBearerToken } from './auth-fixtures.js';
@@ -50,6 +51,56 @@ async function createContext(options: { timeZone?: string; aiSummaryProvider?: A
       database.close();
     },
   };
+}
+
+test('duplicate-key MySQL saat membuat usaha dikembalikan sebagai BUSINESS_ALREADY_EXISTS', async () => {
+  const database = createDatabase(':memory:');
+  const mysqlLikeDatabase = createMysqlDuplicateMembershipClient(database);
+  const token = await createTestBearerToken(database, 'owner-mysql-race');
+  const server = createServer(createApp(mysqlLikeDatabase));
+  try {
+    await new Promise<void>((resolve, reject) => {
+      server.once('error', reject);
+      server.listen(0, '127.0.0.1', resolve);
+    });
+    const address = server.address() as AddressInfo;
+    const response = await fetch(`http://127.0.0.1:${address.port}/api/businesses`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: 'Usaha duplicate test', timeZone: 'Asia/Jakarta' }),
+    });
+    const body = await response.json() as Json;
+    assert.equal(response.status, 409, JSON.stringify(body));
+    assert.equal(body.error.code, 'BUSINESS_ALREADY_EXISTS');
+    assert.equal((database.prepare('SELECT COUNT(*) AS count FROM business').get() as { count: number }).count, 0);
+  } finally {
+    if (server.listening) await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+    await mysqlLikeDatabase.close();
+  }
+});
+
+function createMysqlDuplicateMembershipClient(database: SqliteDatabase): DatabaseClient {
+  const sqliteClient = createSqliteDatabaseClient(database);
+  const wrap = (client: DatabaseClient): DatabaseClient => ({
+    dialect: 'mysql',
+    prepare(sql) {
+      const statement = client.prepare(sql);
+      return {
+        get: (...parameters) => statement.get(...parameters),
+        all: (...parameters) => statement.all(...parameters),
+        run: async (...parameters) => {
+          if (/^\s*INSERT INTO business_membership/i.test(sql)) {
+            throw Object.assign(new Error("Duplicate entry for key 'business_membership.user_id'"), { code: 'ER_DUP_ENTRY' });
+          }
+          return statement.run(...parameters);
+        },
+      };
+    },
+    transaction: (action) => client.transaction((transaction) => action(wrap(transaction))),
+    withAdvisoryLock: (key, action) => client.withAdvisoryLock(key, (locked) => action(wrap(locked))),
+    close: () => client.close(),
+  });
+  return wrap(sqliteClient);
 }
 
 function addBusiness(database: SqliteDatabase, userId: string, timeZone: string): string {

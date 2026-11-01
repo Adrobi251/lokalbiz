@@ -5,6 +5,7 @@ import { test } from 'node:test';
 import type { AddressInfo } from 'node:net';
 import { createApp } from '../src/app.js';
 import { createDatabase, type SqliteDatabase, nowIso } from '../src/db.js';
+import { createSqliteDatabaseClient, type DatabaseClient } from '../src/db-client.js';
 import { createTestBearerToken } from './auth-fixtures.js';
 
 const authSecret = 'test-secret-with-at-least-thirty-two-bytes';
@@ -19,7 +20,7 @@ interface TestContext {
   close: () => Promise<void>;
 }
 
-async function createContext(): Promise<TestContext> {
+async function createContext(databaseClientFactory?: (database: SqliteDatabase) => DatabaseClient): Promise<TestContext> {
   const database = createDatabase(':memory:');
   const businessId = randomUUID();
   const timestamp = nowIso();
@@ -32,7 +33,7 @@ async function createContext(): Promise<TestContext> {
   `).run(randomUUID(), businessId, timestamp);
 
   const token = await createTestBearerToken(database, 'owner-1');
-  const server = createServer(createApp(database));
+  const server = createServer(createApp(databaseClientFactory?.(database) ?? database));
   await new Promise<void>((resolve, reject) => {
     server.once('error', reject);
     server.listen(0, '127.0.0.1', resolve);
@@ -80,11 +81,59 @@ async function createProduct(context: TestContext, name: string, initialStock: n
   return body.data;
 }
 
+function makeDuplicateSkuRaceClient(database: SqliteDatabase): DatabaseClient {
+  const sqlite = createSqliteDatabaseClient(database);
+  let skuUpdates = 0;
+  return {
+    dialect: 'mysql',
+    prepare(sql) {
+      const statement = sqlite.prepare(sql);
+      if (sql.includes('SELECT id FROM product WHERE business_id = ? AND sku = ? AND id <> ?')) {
+        return { ...statement, get: async () => undefined };
+      }
+      if (sql.includes('UPDATE product SET') && sql.includes('sku = ?')) {
+        return {
+          ...statement,
+          run: async (...parameters) => {
+            skuUpdates += 1;
+            if (skuUpdates === 2) {
+              throw Object.assign(new Error('Duplicate entry'), { code: 'ER_DUP_ENTRY' });
+            }
+            return statement.run(...parameters);
+          },
+        };
+      }
+      return statement;
+    },
+    transaction: (action) => sqlite.transaction(action),
+    withAdvisoryLock: (key, action) => sqlite.withAdvisoryLock(key, action),
+    close: () => sqlite.close(),
+  };
+}
+
 function utcDateRange(): { from: string; to: string } {
   const from = new Date().toISOString().slice(0, 10);
   const to = new Date(Date.parse(`${from}T00:00:00.000Z`) + 86_400_000).toISOString().slice(0, 10);
   return { from, to };
 }
+
+test('update SKU serentak mengubah unique-key conflict MySQL menjadi 409', async () => {
+  const context = await createContext(makeDuplicateSkuRaceClient);
+  try {
+    const firstProduct = await createProduct(context, 'Produk satu', 5);
+    const secondProduct = await createProduct(context, 'Produk dua', 5);
+    const updates = await Promise.all([
+      call(context, `/api/products/${firstProduct.id}`, { method: 'PATCH', body: { sku: 'SKU-BERSAMA' } }),
+      call(context, `/api/products/${secondProduct.id}`, { method: 'PATCH', body: { sku: 'SKU-BERSAMA' } }),
+    ]);
+    assert.deepEqual(updates.map((result) => result.response.status).sort(), [200, 409]);
+    const conflict = updates.find((result) => result.response.status === 409);
+    assert.equal(conflict?.body.error.code, 'SKU_ALREADY_EXISTS');
+    assert.equal(context.database.prepare('SELECT COUNT(*) AS count FROM product WHERE sku = ?').get('SKU-BERSAMA')?.count, 1);
+  } finally {
+    await context.close();
+  }
+});
 
 test('penjualan atomik menghitung snapshot harga dan retry dengan key sama mengembalikan transaksi pertama', async () => {
   const context = await createContext();

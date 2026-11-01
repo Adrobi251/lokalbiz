@@ -10,7 +10,7 @@ npm install
 npm run dev
 ```
 
-Vite meneruskan request `/api` ke `http://localhost:3000`. Untuk backend pada alamat lain, set `API_PROXY_TARGET` sebelum `npm run dev`, misalnya `API_PROXY_TARGET=http://127.0.0.1:3100 npm run dev`.
+Frontend selalu memakai path same-origin `/api`. Vite hanya meneruskan request ke backend HTTP di loopback; target eksternal ditolak. `npm run local` dari root repo menyesuaikan proxy dengan `PORT` backend.
 
 Saat pertama membuka UI, buat akun atau masuk menggunakan email dan kata sandi. Browser mengelola sesi melalui cookie `HttpOnly`; frontend mengirim request dengan `credentials: 'include'` dan tidak membaca atau menyimpan token sesi di Web Storage. Frontend mengambil CSRF token dari `GET /api/auth/csrf`, menyimpannya hanya di memori halaman, dan mengirimkannya melalui `X-CSRF-Token` pada request mutasi. Keluar memakai `POST /api/auth/logout`.
 

@@ -10,8 +10,7 @@ import { Products } from './screens/Products';
 import { Reports } from './screens/Reports';
 import { Sales } from './screens/Sales';
 
-const apiBaseKey = 'lokalbiz-api-base';
-const defaultApiBase = import.meta.env.VITE_API_BASE_URL || '/api';
+const defaultApiBase = '/api';
 
 type Gate = 'checking' | 'auth' | 'business' | 'ready';
 type Theme = 'light' | 'dark';
@@ -36,14 +35,12 @@ export function App() {
     setAuthError('');
     try {
       const nextBusiness = await nextApi.getBusiness();
-      sessionStorage.setItem(apiBaseKey, baseUrl);
       setApi(nextApi);
       setBusiness(nextBusiness);
       setGate('ready');
       setPage('overview');
     } catch (reason) {
       if (reason instanceof ApiError && reason.code === 'BUSINESS_NOT_FOUND') {
-        sessionStorage.setItem(apiBaseKey, baseUrl);
         setApi(nextApi);
         setBusiness(null);
         setGate('business');
@@ -55,7 +52,7 @@ export function App() {
 
   async function authenticate(email: string, password: string, mode: AuthMode) {
     setAuthError('');
-    const baseUrl = sessionStorage.getItem(apiBaseKey) || defaultApiBase;
+    const baseUrl = defaultApiBase;
     await authenticateUser(mode, email, password, baseUrl);
     const sessionCsrfToken = await fetchCsrfToken(baseUrl);
     await acceptConnection(baseUrl, sessionCsrfToken);
@@ -64,7 +61,8 @@ export function App() {
   useEffect(() => {
     if (initialSessionCheckStarted.current) return;
     initialSessionCheckStarted.current = true;
-    const baseUrl = sessionStorage.getItem(apiBaseKey) || defaultApiBase;
+    sessionStorage.removeItem('lokalbiz-api-base');
+    const baseUrl = defaultApiBase;
     const currentApi = new ApiClient(baseUrl);
     setApi(currentApi);
 
